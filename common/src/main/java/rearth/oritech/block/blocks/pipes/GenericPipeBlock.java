@@ -10,6 +10,7 @@ import net.minecraft.state.property.BooleanProperty;
 import net.minecraft.state.property.IntProperty;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
+import net.minecraft.util.function.BooleanBiFunction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
@@ -38,6 +39,25 @@ public abstract class GenericPipeBlock extends AbstractPipeBlock implements Wren
     public static final IntProperty UP = IntProperty.of("up", 0, 1);
     public static final IntProperty DOWN = IntProperty.of("down", 0, 1);
     public static final BooleanProperty STRAIGHT = BooleanProperty.of("straight");
+
+    public static final VoxelShape[] THICK_SHAPES = createShapes(
+        Block.createCuboidShape(5, 5, 5, 11, 11, 11),
+        Block.createCuboidShape(5, 5, 0, 11, 11, 5),
+        Block.createCuboidShape(0, 5, 5, 5, 11, 11),
+        Block.createCuboidShape(5, 5, 11, 11, 11, 16),
+        Block.createCuboidShape(11, 5, 5, 16, 11, 11),
+        Block.createCuboidShape(5, 11, 5, 11, 16, 11),
+        Block.createCuboidShape(5, 0, 5, 11, 5, 11)
+    );
+    public static final VoxelShape[] THIN_SHAPES = createShapes(
+        Block.createCuboidShape(6, 6, 6, 10, 10, 10),
+        Block.createCuboidShape(6, 6, 0, 10, 10, 6),
+        Block.createCuboidShape(0, 6, 6, 6, 10, 10),
+        Block.createCuboidShape(6, 6, 10, 10, 10, 16),
+        Block.createCuboidShape(10, 6, 6, 16, 10, 10),
+        Block.createCuboidShape(6, 10, 6, 10, 16, 10),
+        Block.createCuboidShape(6, 0, 6, 10, 6, 10)
+    );
     
     public GenericPipeBlock(Settings settings) {
         super(settings);
@@ -57,36 +77,41 @@ public abstract class GenericPipeBlock extends AbstractPipeBlock implements Wren
     }
     
     protected VoxelShape getShape(BlockState state) {
-        var shape = boundingShapes[0];
-        
-        if (state.get(getNorthProperty()) != NO_CONNECTION)
-            shape = VoxelShapes.union(shape, boundingShapes[1]);
-        if (state.get(getEastProperty()) != NO_CONNECTION)
-            shape = VoxelShapes.union(shape, boundingShapes[2]);
-        if (state.get(getSouthProperty()) != NO_CONNECTION)
-            shape = VoxelShapes.union(shape, boundingShapes[3]);
-        if (state.get(getWestProperty()) != NO_CONNECTION)
-            shape = VoxelShapes.union(shape, boundingShapes[4]);
-        if (state.get(getUpProperty()) != NO_CONNECTION)
-            shape = VoxelShapes.union(shape, boundingShapes[5]);
-        if (state.get(getDownProperty()) != NO_CONNECTION)
-            shape = VoxelShapes.union(shape, boundingShapes[6]);
-        
-        return shape;
+        return boundingShapes[packStates(state)];
     }
     
     protected VoxelShape[] createShapes() {
-        VoxelShape inner = Block.createCuboidShape(5, 5, 5, 11, 11, 11);
-        VoxelShape north = Block.createCuboidShape(5, 5, 0, 11, 11, 5);
-        VoxelShape east = Block.createCuboidShape(0, 5, 5, 5, 11, 11);
-        VoxelShape south = Block.createCuboidShape(5, 5, 11, 11, 11, 16);
-        VoxelShape west = Block.createCuboidShape(11, 5, 5, 16, 11, 11);
-        VoxelShape up = Block.createCuboidShape(5, 11, 5, 11, 16, 11);
-        VoxelShape down = Block.createCuboidShape(5, 0, 5, 11, 5, 11);
-        
-        return new VoxelShape[]{inner, north, west, south, east, up, down};
+        return THICK_SHAPES;
     }
-    
+
+    public static VoxelShape[] createShapes(VoxelShape inner, VoxelShape north, VoxelShape east, VoxelShape south, VoxelShape west, VoxelShape up, VoxelShape down) {
+        VoxelShape[] shapes = new VoxelShape[64];
+
+        for (int i = 0; i <= 63; i++) {
+            VoxelShape shape = inner;
+            if ((i & 1) != 0) shape = VoxelShapes.combine(shape, north, BooleanBiFunction.OR);
+            if ((i & 2) != 0) shape = VoxelShapes.combine(shape, east, BooleanBiFunction.OR);
+            if ((i & 4) != 0) shape = VoxelShapes.combine(shape, south, BooleanBiFunction.OR);
+            if ((i & 8) != 0) shape = VoxelShapes.combine(shape, west, BooleanBiFunction.OR);
+            if ((i & 16) != 0) shape = VoxelShapes.combine(shape, up, BooleanBiFunction.OR);
+            if ((i & 32) != 0) shape = VoxelShapes.combine(shape, down, BooleanBiFunction.OR);
+            shapes[i] = shape.simplify();
+        }
+
+        return shapes;
+    }
+
+    private int packStates(BlockState state) {
+        int i = 0;
+        if (state.get(getNorthProperty()) != NO_CONNECTION) i |= 1;
+        if (state.get(getEastProperty()) != NO_CONNECTION) i |= 2;
+        if (state.get(getSouthProperty()) != NO_CONNECTION) i |= 4;
+        if (state.get(getWestProperty()) != NO_CONNECTION) i |= 8;
+        if (state.get(getUpProperty()) != NO_CONNECTION) i |= 16;
+        if (state.get(getDownProperty()) != NO_CONNECTION) i |= 32;
+        return i;
+    }
+
     @Override
     public void onBlockAdded(BlockState state, World world, BlockPos pos, BlockState oldState, boolean notify) {
         if (oldState.getBlock().equals(state.getBlock())) return;
@@ -323,20 +348,11 @@ public abstract class GenericPipeBlock extends AbstractPipeBlock implements Wren
      * @return The updated block-state
      */
     public BlockState addStraightState(BlockState state) {
-        var north = state.get(getNorthProperty()) != NO_CONNECTION;
-        var south = state.get(getSouthProperty()) != NO_CONNECTION;
-        var east = state.get(getEastProperty()) != NO_CONNECTION;
-        var west = state.get(getWestProperty()) != NO_CONNECTION;
-        var up = state.get(getUpProperty()) != NO_CONNECTION;
-        var down = state.get(getDownProperty()) != NO_CONNECTION;
-        
-        // Check for straight connections along each axis
-        boolean straightX = north && south && !east && !west && !up && !down;
-        boolean straightY = up && down && !north && !south && !east && !west;
-        boolean straightZ = east && west && !north && !south && !up && !down;
-        
-        // The pipe is straight if exactly one of the axes has a straight connection
-        var straight = straightX || straightY || straightZ;
+        int i = packStates(state);
+
+        boolean straight = i == (1 + 32) || // north and south
+                            i == (2 + 8) || // east and west
+                            i == (16 + 32); // up and down
         
         return state.with(STRAIGHT, straight);
     }
